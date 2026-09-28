@@ -35,7 +35,8 @@ class FlashNextEngine:
         from .decode import Engine
         from .weights import draft_token_ids, load
         from tensorfold.cuda.capacity import admit, gather_ints
-        from tensorfold.cuda.geometry import gdn_geometry, indexed_stream_geometry, indexed_weights
+        from tensorfold.cuda.geometry import (INDEXED_PREFILL_ROWS, PREFILL_ROWS, gdn_geometry,
+                                              indexed_stream_geometry, indexed_weights)
 
         if tp not in (1, 2) or rank not in range(tp):
             raise ValueError(f"rank {rank} of {tp}: Flash Next runs on one GPU or two")
@@ -57,9 +58,12 @@ class FlashNextEngine:
             self.comm.barrier()
         gather = (lambda values: gather_ints(torch, self.comm.all_gather, values)) if tp == 2 else None
         each, mtp = self.depth + 1, self.depth > 0
+        # a prompt chunk's rows: wide on MLX checkpoints; an EXL3 pack's n-gram staging holds 2,048
+        rows = PREFILL_ROWS if exl3 else INDEXED_PREFILL_ROWS
         # one admission for one stream or many (every slot, the shared rows and kept snapshots), before any load
-        geometry = ((lambda text: indexed_stream_geometry(text, streams, each, KEEP, mtp=mtp)) if streams > 1 else
-                    (lambda text: gdn_geometry(text, tp, each, indexed=True, mtp=mtp)))
+        geometry = ((lambda text: indexed_stream_geometry(text, streams, each, KEEP, mtp=mtp, prefill_rows=rows))
+                    if streams > 1 else
+                    (lambda text: gdn_geometry(text, tp, each, indexed=True, mtp=mtp, prefill_rows=rows)))
         if exl3:
             geometry = admission(geometry)
         self.capacity_plan = admit(model_dir, max_len, context_explicit, torch, geometry,
@@ -85,10 +89,11 @@ class FlashNextEngine:
 
             self.e = None
             self.multi = MultiDecoder(w, slots=streams, capacity=self.max_len, depth=self.depth,
-                                      confidence=self.confidence, keep=KEEP)
+                                      confidence=self.confidence, keep=KEEP, prefill_rows=rows)
             self.scheduler = Scheduler(self.multi, max_streams=streams)
         else:
-            self.e = Engine(w, capacity=self.max_len, max_rows=max(8, self.depth + 1), graphs=graphs)
+            self.e = Engine(w, capacity=self.max_len, max_rows=max(8, self.depth + 1), prefill_rows=rows,
+                            graphs=graphs)
         started = time.perf_counter()
         locked = False
         if prefetch and not ple_on_ssd:               # the n-gram tables' pages, read now rather than by requests

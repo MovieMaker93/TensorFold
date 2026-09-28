@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 from .capacity import Geometry, SIZES
 
-PREFILL_ROWS = 2048     # a prompt chunk's rows: Flash Next and GLM keep buffers of this many rows
+PREFILL_ROWS = 2048     # a prompt chunk's rows: GLM keeps buffers of this many rows
+INDEXED_PREFILL_ROWS = 8192  # Flash Next's prompt chunk rows on MLX checkpoints (an EXL3 pack keeps PREFILL_ROWS)
 PREFILL_ATT_ROWS = 256  # Flash Next's prompt attention block
 
 
@@ -122,7 +123,8 @@ def layer_counts(t: dict) -> tuple[int, int]:
     return layers - layers // interval, layers // interval
 
 
-def gdn_geometry(t: dict, world: int, reserve: int, *, indexed: bool = False, mtp: bool = False) -> Geometry:
+def gdn_geometry(t: dict, world: int, reserve: int, *, indexed: bool = False, mtp: bool = False,
+                 prefill_rows: int = INDEXED_PREFILL_ROWS) -> Geometry:
     linear, attention = layer_counts(t)
     d, h = int(t["hidden_size"]), int(t["num_attention_heads"]) // world
     hk = int(t["num_key_value_heads"]) // world
@@ -146,7 +148,7 @@ def gdn_geometry(t: dict, world: int, reserve: int, *, indexed: bool = False, mt
     fixed += (2 if mtp else 1) * 32 * rows * 2560 * 4
     if indexed:
         fixed += 4 * (int(t.get("ple_conv_kernel_size", 4)) - 1) * int(t.get("ngram_size", 3)) * streams * d * 2
-        fixed += PREFILL_ROWS * _indexed_prefill_row(t, world, h, hk, hd, nv, dv, width, slots, intermediate)
+        fixed += prefill_rows * _indexed_prefill_row(t, world, h, hk, hd, nv, dv, width, slots, intermediate)
     count = attention + int(mtp)
     budget = int(t.get("indexer_budget", 2048))
     def bytes_at(capacity: int) -> int:
@@ -260,7 +262,8 @@ def stream_geometry(t: dict, world: int, streams: int, keep: int) -> Geometry:
     return Geometry(bytes_at, 1)
 
 
-def indexed_stream_geometry(t: dict, streams: int, each: int, keep: int, *, mtp: bool) -> Geometry:
+def indexed_stream_geometry(t: dict, streams: int, each: int, keep: int, *, mtp: bool,
+                            prefill_rows: int = INDEXED_PREFILL_ROWS) -> Geometry:
     """Flash Next's concurrent decoder on one GPU: ``streams`` slots of ``each``-row windows and kept snapshots."""
 
     linear, attention = layer_counts(t)
@@ -277,7 +280,7 @@ def indexed_stream_geometry(t: dict, streams: int, each: int, keep: int, *, mtp:
     moe = int(t.get("moe_intermediate_size", t.get("intermediate_size", d)))
     extent = d * hc + int(t["vocab_size"]) + slots * (moe + d) + width + h * hd
     fixed += (1 + mtp) * (linear * rows * width * 2 + 32 * max(rows, 4) * 2560 * 4) + 16 * max(64, rows) * extent * 4
-    fixed += PREFILL_ROWS * _indexed_prefill_row(t, 1, h, hk, hd, nv, dv, width, slots, moe)
+    fixed += prefill_rows * _indexed_prefill_row(t, 1, h, hk, hd, nv, dv, width, slots, moe)
     count = attention + int(mtp)
     def bytes_at(capacity: int) -> int:
         blocks = (capacity + ratio - 1) // ratio

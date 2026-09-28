@@ -30,7 +30,7 @@ class MultiDecoder:
     """Rounds over the live streams; ``slots`` streams at most, each with ``capacity`` tokens of context."""
 
     def __init__(self, w, *, slots: int, capacity: int, depth: int = DEPTH, confidence: float = CONFIDENCE,
-                 stop_eos: bool = True, keep: int = 8) -> None:
+                 stop_eos: bool = True, keep: int = 8, prefill_rows: int = PREFILL_ROWS) -> None:
         if w.comm is not None:
             raise ValueError("concurrent Flash Next runs on one GPU for now")
         self.w, self.depth, self.confidence, self.capacity = w, depth, confidence, capacity
@@ -38,7 +38,7 @@ class MultiDecoder:
         rows = slots * (depth + 1)
         self.buf = Buffers(w, rows, capacity)
         self.mbuf = Buffers(w, rows, capacity) if w.mtp is not None else None
-        self.pbuf = Buffers(w, PREFILL_ROWS, capacity, prefill=True)
+        self.pbuf = Buffers(w, prefill_rows, capacity, prefill=True)
         self.free = [State(w, capacity, depth + 1) for _ in range(slots)]      # sized by the startup admission
         self.slot_bytes = sum(t.numel() * t.element_size() for t in _tensors(self.free[0]))
         self.streams: dict[int, Stream] = {}

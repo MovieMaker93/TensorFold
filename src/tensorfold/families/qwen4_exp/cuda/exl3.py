@@ -10,11 +10,11 @@ import torch
 
 from tensorfold.cuda.exl3 import experts as x3experts
 from tensorfold.cuda.exl3 import format as fmt
+# the rows the engine gives an EXL3 pack's prompt buffers: the n-gram staging holds as many
+from tensorfold.cuda.geometry import PREFILL_ROWS
 
 from .exl3_mm import Scratch, f16, stack, x3
 from .exl3_pack import _DT, NgramTable, Pack, is_exl3
-
-PREFILL_ROWS = 2048       # the prompt buffers' rows (``decode.PREFILL_ROWS``): the n-gram staging holds as many
 
 __all__ = ["is_exl3", "load"]
 

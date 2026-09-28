@@ -93,7 +93,8 @@ def test_indexed_state_actual_kv_and_serial_twin_are_budgeted(monkeypatch, alloc
     mod.Buffers(weights, 64, slots)
     if mtp:
         mod.Buffers(weights, 64, slots)
-    mod.Buffers(weights, 2048, slots, prefill=True)     # the prompt chunks' buffers, as ``decode.Engine`` makes them
+    mod.Buffers(weights, geometry.INDEXED_PREFILL_ROWS, slots, prefill=True)   # the prompt chunks' buffers, as
+    # ``decode.Engine`` makes them
     mod.State(weights, slots, 64)
     mod.State(weights, slots, 64)  # the actual serial-reference twin constructor
     estimated = geometry.gdn_geometry(text, world, 7, indexed=True, mtp=mtp).bytes_at(slots)
