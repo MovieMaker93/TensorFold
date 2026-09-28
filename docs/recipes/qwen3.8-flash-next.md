@@ -58,10 +58,13 @@ when N exceeds one. The single-request engine retains prompt and reply states fo
 concurrent decoder retains prompt snapshots per stream. Cache capacity is allocated at startup; inspect
 the reported capacity rather than assuming an older fixed token limit.
 
-Prompts of MLX checkpoints prefill in chunks of 8,192 rows (EXL3 packs keep 2,048). A row's bits never
-depend on its chunk, so the chunk size sets speed and memory only: on one Spark with a 131,072-token cache,
-8,192-row chunks prefill 8k- to 120k-token prompts 14-26% faster than 2,048-row chunks (2,236 to 2,552 tok/s
-at 8k, 1,939 to 2,299 at 120k) for about 2.4 GiB more memory, which the startup estimate includes.
+Prompts prefill in chunks of 2,048 rows. A row's bits never depend on its chunk, so `TENSORFOLD_PREFILL_ROWS`
+(256 to 16,384; MLX checkpoints, EXL3 packs keep 2,048) trades memory for long-prompt speed. Wider chunks take
+about 0.47 MB a row more (8,192 rows: 2.4 GiB, included in the startup estimate), which on a unified-memory GPU
+comes out of the page cache that holds the n-gram tables. On one Spark with a 32,768-token cache the tables stay
+cached and 8,192 rows prefill 4k- to 24k-token prompts 8-18% faster with short prompts unchanged; with a
+131,072-token cache they no longer fit, and prompts of new text up to about 16k tokens get slower (606 tokens:
+0.39-0.44 s become 0.48-0.71 s), so keep the default there.
 
 N-gram tables are file-backed host data. On unified-memory GPUs they compete with weights and cache
 allocations for RAM, so a checkpoint's GPU allocation alone does not describe its memory requirement.

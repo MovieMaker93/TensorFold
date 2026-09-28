@@ -9,7 +9,6 @@ from typing import Sequence
 import numpy as np
 import torch
 
-from tensorfold.cuda.geometry import INDEXED_PREFILL_ROWS
 from tensorfold.cuda.sampling import sample_rows
 from tensorfold.engine.exact_sampling import MARGIN, Sampling, choose_rows
 
@@ -106,9 +105,7 @@ def _gathered_fits(sampling: Sampling | None) -> bool:
     return sampling is None or sampling.temperature <= 0 or (bool(sampling.top_k) and sampling.top_k + MARGIN <= CAND)
 
 
-# rows of a prompt chunk; rows never depend on their chunk, so this sets speed and memory only (on a GB10,
-# 8,192-row chunks prefill about 20% faster than 2,048-row ones and take about 3 GB more)
-PREFILL_ROWS = INDEXED_PREFILL_ROWS
+PREFILL_ROWS = 2048      # rows of a prompt chunk (the server's engine: ``geometry.indexed_prefill_rows()``)
 
 
 class Engine:

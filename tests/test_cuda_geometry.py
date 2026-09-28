@@ -93,7 +93,7 @@ def test_indexed_state_actual_kv_and_serial_twin_are_budgeted(monkeypatch, alloc
     mod.Buffers(weights, 64, slots)
     if mtp:
         mod.Buffers(weights, 64, slots)
-    mod.Buffers(weights, geometry.INDEXED_PREFILL_ROWS, slots, prefill=True)   # the prompt chunks' buffers, as
+    mod.Buffers(weights, geometry.indexed_prefill_rows(), slots, prefill=True)   # the prompt chunks' buffers, as
     # ``decode.Engine`` makes them
     mod.State(weights, slots, 64)
     mod.State(weights, slots, 64)  # the actual serial-reference twin constructor
@@ -153,3 +153,24 @@ def test_gpu_and_host_available_memory_are_both_guarded(monkeypatch):
     fake = SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda: (100 * capacity.GIB, 128 * capacity.GIB)))
     monkeypatch.setattr(Path, "read_text", lambda *a: "MemTotal: 134217728 kB\nMemAvailable: 62914560 kB\n")
     assert capacity.available_bytes(fake) == 60 * capacity.GIB - 128 * capacity.GIB // 10
+
+
+def test_indexed_prefill_rows_default_override_and_budget(monkeypatch):
+    """Flash Next keeps 2,048-row prompt chunks unless TENSORFOLD_PREFILL_ROWS asks for more, and the startup
+    estimate grows with the rows it asks for."""
+
+    text = {"hidden_size": 512, "num_attention_heads": 8, "num_key_value_heads": 2, "head_dim": 64,
+            "num_hidden_layers": 4, "layer_types": ["linear_attention", "full_attention"] * 2,
+            "linear_num_key_heads": 2, "linear_num_value_heads": 4, "linear_key_head_dim": 128,
+            "linear_value_head_dim": 128, "linear_conv_kernel_dim": 4, "vocab_size": 1024, "hc_count": 4}
+    monkeypatch.delenv("TENSORFOLD_PREFILL_ROWS", raising=False)
+    assert geometry.indexed_prefill_rows() == geometry.PREFILL_ROWS == 2048
+    default = geometry.gdn_geometry(text, 1, 7, indexed=True).bytes_at(4096)
+    assert default == geometry.gdn_geometry(text, 1, 7, indexed=True, prefill_rows=2048).bytes_at(4096)
+    monkeypatch.setenv("TENSORFOLD_PREFILL_ROWS", "8192")
+    assert geometry.indexed_prefill_rows() == 8192
+    assert geometry.gdn_geometry(text, 1, 7, indexed=True).bytes_at(4096) > default
+    for bad in ("100", "32768"):
+        monkeypatch.setenv("TENSORFOLD_PREFILL_ROWS", bad)
+        with pytest.raises(ValueError):
+            geometry.indexed_prefill_rows()
